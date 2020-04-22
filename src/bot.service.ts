@@ -1,9 +1,8 @@
 import { Injectable } from '@nestjs/common';
-import { connect, launch, Page } from 'puppeteer';
+import { connect } from 'puppeteer';
 import { shuffle } from 'lodash';
 
 import { BotHelperService } from './bot-helper.service';
-import { hashTagContext, profileContext } from './models/context';
 
 @Injectable()
 export class BotService extends BotHelperService {
@@ -20,7 +19,6 @@ export class BotService extends BotHelperService {
     for (const page of pages) {
       if (page.url().includes('instagram.com')) {
         instagramPage = page;
-        await this.sleep();
       }
     }
 
@@ -28,7 +26,7 @@ export class BotService extends BotHelperService {
       // bug here
       const page = await browser.newPage();
       instagramPage = await page.goto(this.urls.source);
-      await instagramPage.waitFor(2500);
+      await page.waitFor(2500);
     }
 
     await this.sleep();
@@ -36,203 +34,165 @@ export class BotService extends BotHelperService {
   };
 
   loginProcedure = async () => {
-    console.info('Filling in username');
-    this.type(this.selectors.loginUsername, this.config.username);
+    this.logger.verbose('Filling in username');
+    await this.type(this.selectors.loginUsername, this.config.username);
 
-    await this.waitAction();
+    this.logger.verbose('Filling in password');
+    await this.type(this.selectors.loginPassword, this.config.password);
 
-    console.info('Filling in password');
-    this.type(this.selectors.loginPassword, this.config.password);
-
-    console.info('Logging in..');
+    this.logger.verbose('Logging in..');
     await this.page.click(this.selectors.loginSubmit);
 
     await this.page.waitForNavigation();
-    await this.waitAction();
   };
 
-  interactWithMostRecentHashtag = async (hashTag: string) => {
+  interactWithMostRecentHashtag = async () => {
     if (!this.levers.likeMostRecent) {
-      console.log(`${hashTag} | Most Recent Photos - Skipped`);
+      this.logger.verbose(`${this.hashtag} | Most Recent Photos - Skipped`);
       return;
     }
-    console.log(`${hashTag} | Most Recent Photos - Initiated`);
+    this.logger.log(`${this.hashtag} | Most Recent Photos - Initiated`);
 
-    return await this.gridHashtagInteraction(hashTag, {
-      photosToLook: this.levers.mostRecentPhotosToLook,
-      isMostRecent: true,
-    });
+    return await this.gridHashtagInteraction(
+      this.selectors.mostRecentGrid,
+      this.levers.mostRecentPhotosToLook,
+    );
   };
 
-  interactWithTopPostHashtag = async (hashTag: string) => {
+  interactWithTopPostHashtag = async () => {
     if (!this.levers.likeTopPosts) {
-      console.log(`${hashTag} | Top Photos - Skipped`);
+      this.logger.verbose(`${this.hashtag} | Top Photos - Skipped`);
       return;
     }
 
-    console.log(`${hashTag} | Top Photos - Initiated`);
+    this.logger.log(`${this.hashtag} | Top Photos - Initiated`);
 
-    return await this.gridHashtagInteraction(hashTag, {
-      photosToLook: this.levers.topPostsToLook,
-      isMostRecent: false,
-    });
+    return await this.gridHashtagInteraction(
+      this.selectors.topPhotosGrid,
+      this.levers.topPostsToLook,
+    );
   };
 
   gridHashtagInteraction = async (
-    category: string,
-    options: {
-      photosToLook: number;
-      isMostRecent: boolean;
-    },
+    gridSelector: (row: number, column: number) => string,
+    photosToLook: number,
   ) => {
-    let photosLooked = 1;
+    let hashtagIndex = 1;
     for (let row = 1; row < 4; row++) {
       for (let column = 1; column < 4; column++) {
-        const tileSelector = !options.isMostRecent
-          ? `article .weEfm:nth-child(${row}) > ._bz0w:nth-child(${column}) > a`
-          : `article > div > div > .weEfm:nth-child(${row}) > ._bz0w:nth-child(${column}) > a`;
+        const tileSelector = gridSelector(row, column);
 
         await this.click(tileSelector);
 
         const username = await this.getUserName();
+        this.username = username;
+        this.hashtagIndex = hashtagIndex;
+        this.hashtagColumn = column;
+        this.hashtagRow = row;
 
         await this.click(this.selectors.photoPopupUsername);
 
-        await this.gridProfileInteraction(username, {
-          photosToLook: this.levers.profilePhotosToLook,
-          hashTagContext: {
-            row: row,
-            column: column,
-            imageNumber: photosLooked,
-            category: category,
-          },
-        });
+        await this.gridProfileInteraction(this.levers.profilePhotosToLook);
 
-        await this.goToHashTag(category);
+        await this.goToHashTag(this.hashtag);
 
-        if (photosLooked > options.photosToLook) {
-          console.log(`${category} | ${username} | Reached Limit.`);
+        if (hashtagIndex > photosToLook) {
+          this.hashtagIndex = -1;
+          this.log('Reached Limit Hashtag.');
           return;
         }
-        photosLooked++;
+        hashtagIndex++;
       }
     }
     return;
   };
 
-  gridProfileInteraction = async (
-    username: string,
-    options: {
-      photosToLook: number;
-      hashTagContext: {
-        row: number;
-        column: number;
-        imageNumber: number;
-        category: string;
-      };
-    },
-  ) => {
-    let photosLooked = 1;
+  gridProfileInteraction = async (photosToLook: number) => {
+    let photoIndex = 1;
 
-    const postCount = await this.getPostCount();
-    console.log(`Post Count ${postCount}`);
-    if (postCount <= 50) {
-      console.log('Post Count under 50. Skipping user');
+    const valid = await this.validateProfile();
+
+    if (!valid) {
+      this.log('Invalid Profile. Skipping');
+      await this.goToHashTag(this.hashtag);
       return;
     }
 
-    const followerCount = await this.getFollowerCount();
-    console.log(`Follower Count ${followerCount}`);
-    if (followerCount <= 500) {
-      console.log('Post Count under 500. Skipping user');
-      return;
+    const hasSeenStories = await this.hasSeenStories();
+    if (!hasSeenStories) {
+      await this.viewStories();
+    } else {
+      this.logger.log('Already screen stories');
     }
-    for (let row = 1; row < 4; row++) {
+
+    for (let row = 1; row < 100; row++) {
       for (let column = 1; column < 4; column++) {
-        const tile = `article .weEfm:nth-child(${row}) > ._bz0w:nth-child(${column}) > a`;
+        const tileSelector = this.selectors.profileGrid(row, column);
 
-        const newOptions = {
-          ...options,
-          profileContext: {
-            row: row,
-            column: column,
-            imageNumber: photosLooked,
-          },
-        };
+        this.profileIndex = photoIndex;
+        this.profileColumn = column;
+        this.profileRow = row;
 
-        await this.click(tile);
+        await this.click(tileSelector);
 
-        await this.likePost(username, newOptions);
+        await this.likePost();
 
         await this.closePopup();
 
-        if (photosLooked >= options.photosToLook) {
-          console.log(
-            `${options.hashTagContext.category} | ${username} | Reached Limit.`,
-          );
+        if (photoIndex >= photosToLook) {
+          this.profileIndex = -1;
+          this.log('Reached Limit Profile.');
           return;
         }
-        photosLooked++;
+        photoIndex++;
       }
     }
     return;
   };
 
-  likePost = async (
-    username: string,
-    options: {
-      photosToLook: number;
-      hashTagContext: hashTagContext;
-      profileContext: profileContext;
-    },
-  ) => {
-    let consolePrefix = `${options.hashTagContext.category} | ${username} | image:${options.profileContext.imageNumber}`;
+  likePost = async () => {
     if (this.levers.disableLike) {
-      console.log(
-        `LIKED AMT:${this.photosLiked} | ${consolePrefix} | Like Disabled - Skipped!`,
-      );
+      this.log('Like Disabled - Skipped!');
       return;
     }
 
     // bug with empty heart
-    const hasEmptyHeart = await this.hasEmptyHeart();
+    const hasGreyHeart = await this.hasGreyHeart();
 
-    let action = '';
-    if (!hasEmptyHeart) {
-      action = 'Post already liked - Skipped!';
+    if (!hasGreyHeart) {
+      this.log('Post already liked - Skipped!');
     } else if (Math.random() < this.levers.likeRatio) {
       this.photosLiked += 1;
-      this.likedUsers.push(username);
-      action = 'Liked!';
+      this.likedUsers.push(this.username);
+
+      this.log('Liked!');
       await this.click(this.selectors.photoPopupLikeButton);
     } else {
-      action = 'Like Ratio - Skipped!';
+      this.log('Like Ratio - Skipped!');
     }
-
-    console.log(`LIKED AMT:${this.photosLiked} | ${consolePrefix} | ${action}`);
 
     await this.waitAction();
   };
 
   visitHashTags = async () => {
     const hashTags = shuffle(this.config.hashtags);
-    console.log('Visiting hashtags', hashTags);
+    this.logger.log(`Visiting hashtags ${hashTags}`);
 
     for (let tagIndex = 0; tagIndex < hashTags.length; tagIndex++) {
-      const hashTag = hashTags[tagIndex];
+      this.hashtag = hashTags[tagIndex];
 
-      console.log(`${hashTag} | Curently Exploring...`);
+      this.logger.log(`${this.hashtag} | Curently Exploring...`);
 
-      await this.searchHashTag(hashTag);
+      await this.searchHashTag(this.hashtag);
 
-      await this.interactWithTopPostHashtag(hashTag);
+      await this.interactWithTopPostHashtag();
 
-      await this.interactWithMostRecentHashtag(hashTag);
+      await this.interactWithMostRecentHashtag();
     }
   };
 
   async start(): Promise<string> {
-    console.log('Instabot Initialized');
+    this.logger.log('Instabot Initialized');
 
     this.page = await this.initPuppeter();
 
@@ -240,22 +200,20 @@ export class BotService extends BotHelperService {
 
     this.waitAction();
 
-    if (!this.isLoggedIn) {
+    const isLoggedIn = await this.isLoggedIn();
+    if (!isLoggedIn) {
       await this.loginProcedure();
     }
 
-    //Close turn on notification modal after login
     await this.checkNotificationDialog();
 
     await this.navigateToHomePage();
 
     await this.visitHashTags();
 
-    console.log('Finished. Here are the results....');
+    this.printResults();
 
-    console.log('Photos liked', this.photosLiked);
-    console.log('Users liked with', this.likedUsers);
-
+    await this.viewStories();
     return 'Done.';
   }
 }

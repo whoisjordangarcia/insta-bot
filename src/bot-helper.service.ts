@@ -8,21 +8,52 @@ export class BotHelperService extends BotBaseService {
     let number = 1;
 
     if (this.levers.likeTopPosts) {
-      number =
-        number * this.levers.profilePhotosToLook * this.levers.topPostsToLook;
+      number = this.levers.profilePhotosToLook * this.levers.topPostsToLook;
     }
 
     if (this.levers.likeMostRecent) {
       number =
-        number *
-        this.levers.profilePhotosToLook *
-        this.levers.mostRecentPhotosToLook;
+        number +
+        this.levers.profilePhotosToLook * this.levers.mostRecentPhotosToLook;
     }
-    console.log(`Potential to like: ${number}`);
+    this.logger.log(`Potential to like: ${number}`);
+  };
+
+  validateProfile = async () => {
+    let valid = true;
+    const postCount = await this.getPostCount();
+
+    this.logger.verbose(`Post Count ${postCount}`);
+
+    if (postCount <= this.levers.minPhotos) {
+      this.logger.verbose(
+        `Post count under ${this.levers.minPhotos}. Invalid profile.`,
+      );
+      valid = false;
+    }
+
+    const followerCount = await this.getFollowerCount();
+
+    this.logger.verbose(`Followers Count ${followerCount}.`);
+
+    if (followerCount <= this.levers.minFollows) {
+      this.logger.verbose(
+        `Post count under ${this.levers.minFollows}. Invalid profile.`,
+      );
+      valid = false;
+    }
+    return valid;
+  };
+
+  printResults = () => {
+    this.logger.log('Finished. Here are the results....');
+
+    this.logger.log(`Photos liked ${this.photosLiked}`);
+    this.logger.log(`Users liked with ${this.likedUsers}`);
   };
 
   goToHashTag = async (category: string) => {
-    //console.log(`Navigating to hashtag page ${category}`);
+    this.logger.verbose(`Navigating to hashtag page ${category}`);
 
     await this.page.goto(
       `${this.urls.source}/explore/tags/${category.replace('#', '')}/`,
@@ -30,26 +61,58 @@ export class BotHelperService extends BotBaseService {
     await this.waitAction();
   };
 
-  checkNotificationDialog = async () => {
+  viewStories = async () => {
+    this.logger.log('About to view story');
+
     try {
-      console.info('Checking notification dialog');
-      await this.waitAction();
+      await this.waitForElement(this.selectors.profileStoryButton, 200);
+
+      this.click(this.selectors.profileStoryButton);
+    } catch (e) {
+      this.logger.verbose('Stories already viewed');
+    }
+
+    try {
+      await this.page.waitForSelector(this.selectors.profileAmountOfPosts, {
+        visible: true,
+        timeout: 100000,
+      });
+
+      this.logger.log('Finished watching stories!');
+    } catch (e) {
+      console.log('Could not detect a screen close.');
+    }
+  };
+
+  checkNotificationDialog = async () => {
+    // Close turn on notification modal after login
+    try {
+      this.logger.log('Checking notification dialog');
 
       await this.waitForElement(this.selectors.notificationDialog, 200);
 
       await this.click(this.selectors.notificationDialogNotNow);
+
+      this.logger.verbose('Has found notification dialog');
+
+      await this.waitAction();
     } catch (e) {
-      console.log('Turn on notifications not found. Skipping.');
+      this.logger.verbose('Turn on notifications not found. Skipping.');
     }
   };
 
   navigateToHomePage = async () => {
-    console.log('Navigating to homepage');
+    if (this.page.url() === this.urls.source) {
+      return;
+    }
+    this.logger.log(this.page.url());
+    this.logger.log('Navigating to homepage');
+
     await this.click(this.selectors.homepage);
   };
 
   sleep = () => {
-    console.log('waiting...');
+    this.logger.log('Waiting...');
     return new Promise(resolve => {
       setTimeout(resolve, 5000);
     });
@@ -59,7 +122,6 @@ export class BotHelperService extends BotBaseService {
     let value = null;
     try {
       value = await this.page.evaluate(select => {
-        console.log(select);
         const element: HTMLLinkElement = document.querySelector(select);
         return Promise.resolve(element ? element.innerText : '');
       }, selector);
@@ -91,84 +153,153 @@ export class BotHelperService extends BotBaseService {
   };
 
   clearInput = async () => {
-    // console.log('Clearing input');
+    this.logger.verbose('Clearing input');
     try {
       await this.waitForElement(this.selectors.clearSearchBox, 100);
+
+      this.logger.debug('Has found clear input button');
+
       await this.click(this.selectors.clearSearchBox);
     } catch (e) {}
     await this.waitAction();
   };
 
   searchHashTag = async (hashTag: string) => {
-    //console.log('Performing Hashtag search');
+    this.logger.verbose('Performing Hashtag search');
     await this.clearInput();
 
-    //console.log('Typing hashtag');
+    this.logger.verbose('Typing hashtag');
     await this.type(this.selectors.searchbox, hashTag);
 
-    //console.log('Selecting hashtag');
+    this.logger.verbose('Selecting hashtag');
     await this.page.keyboard.press('ArrowDown');
     await this.waitAction();
+
     await this.page.keyboard.press('Enter');
     await this.waitAction();
   };
 
   closePopup = async () => {
     try {
-      //console.log('Closing popup.');
+      this.logger.verbose('Closing popup.');
       this.click(this.selectors.photoPopupClose);
-    } catch (e) {}
+    } catch (e) {
+      this.logger.debug('Could not find close button');
+    }
 
     await this.waitAction();
   };
 
   type = async (selector: string, value: string) => {
-    await this.page.focus(selector);
-    await this.page.keyboard.type(value, {
-      delay:
-        Math.floor(Math.random() * this.levers.randomTypeMax) +
-        this.levers.randomTypeMin,
-    });
+    try {
+      await this.page.focus(selector);
 
-    await this.waitAction();
+      await this.page.keyboard.type(value, {
+        delay:
+          Math.floor(Math.random() * this.levers.randomTypeMax) +
+          this.levers.randomTypeMin,
+      });
+
+      await this.waitAction();
+    } catch (e) {
+      this.logger.error(`Could not type for '${selector}' - '${value}'`);
+    }
   };
 
-  click = async (selector: string) => {
-    // console.log(`About to click ${selector}`);
-    await this.page.focus(selector);
-    await this.page.click(selector);
-    await this.page.waitFor(this.actionRandomWait());
+  click = async (selector: string, scroll: boolean = true) => {
+    try {
+      this.logger.verbose(`clicking '${selector}'`);
+
+      await this.page.focus(selector);
+
+      if (scroll) {
+        await this.page.evaluate(select => {
+          const element = document.querySelector(select);
+          if (
+            typeof element.scrollIntoView !== 'undefined' &&
+            typeof element.scrollIntoView === 'function'
+          ) {
+            element.scrollIntoView();
+          }
+        }, selector);
+      }
+
+      await this.waitAction();
+
+      await this.page.evaluate(select => {
+        document.querySelector(select).click();
+      }, selector);
+
+      await this.waitAction();
+    } catch (e) {
+      this.logger.error(`Could not type for '${selector}'`);
+    }
   };
 
   isLoggedIn = async () => {
     let loggedIn = false;
+    this.logger.verbose('Checking if user is logged in.');
     try {
-      console.info('Checking if user is logged in.');
-      this.waitForElement(this.selectors.loggedinState);
-      console.info('User is logged in.');
+      await this.waitForElement(this.selectors.loggedinState, 200);
+      this.logger.verbose('User is logged in.');
       loggedIn = true;
     } catch (e) {
-      console.log('User is logged out.');
+      this.logger.verbose('User is logged out.');
       loggedIn = false;
     }
     return loggedIn;
   };
 
-  hasEmptyHeart = async () =>
-    await this.page.$(this.selectors.photoPopupGreyLikeButton);
+  hasGreyHeart = async () => {
+    let haGreyHeart = false;
+    try {
+      await this.page.waitForSelector(this.selectors.photoPopupGreyLikeButton);
+
+      this.logger.debug('Found Grey Heart');
+
+      haGreyHeart = true;
+    } catch (e) {
+      this.logger.debug('Could not find grey heart');
+    }
+    return haGreyHeart;
+  };
+
+  hasSeenStories = async () => {
+    let hasScreenStory = false;
+    try {
+      await this.page.waitForSelector(this.selectors.profileStoryButtonRead);
+
+      this.logger.debug('Found seen story button');
+
+      hasScreenStory = true;
+    } catch (e) {
+      this.logger.debug('Could not find seen story button');
+    }
+    return hasScreenStory;
+  };
 
   actionRandomWait = (): number => {
     const waitTime =
       Math.floor(Math.random() * this.levers.randomWaitMax) +
       this.levers.randomWaitMin;
-    //console.log(`Random wait time: ${waitTime}`);
+    this.logger.verbose(`Random wait time: ${waitTime}`);
     return waitTime;
   };
 
   waitAction = async () => await this.page.waitFor(this.actionRandomWait());
 
-  waitForElement = async (selector: string, timeout: number = 4000) =>
-    await this.page.waitForSelector(selector, {
-      timeout,
-    });
+  waitForElement = async (selector: string, timeout: number = 4000) => {
+    try {
+      await this.page.waitForSelector(selector, {
+        timeout,
+      });
+    } catch (e) {
+      this.logger.error(`Could not wait for element ${selector}`);
+    }
+  };
+
+  log = (action: string) =>
+    this.logger.log(
+      `${this.hashtag} | ${this.username} | LIKED ${this.photosLiked} | IMG ${this.profileIndex} | ${action}`,
+    );
 }
