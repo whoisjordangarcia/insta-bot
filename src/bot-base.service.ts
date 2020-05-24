@@ -39,7 +39,7 @@ export class BotBaseService {
   config = {
     hashtags: ['#fujifilm_xseries', '#fujinon', '#fujilove', '#myfujilove'],
     headless: false,
-    username: processs.env.username,
+    username: process.env.username,
     password: process.env.password,
     // /Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome --remote-debugging-port=9222 --no-first-run --no-default-browser-check --user-data-dir=$(mktemp -d -t 'chrome-remote_data_dir')
     browserWsEndpoint:
