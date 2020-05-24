@@ -39,10 +39,11 @@ export class BotBaseService {
   config = {
     hashtags: ['#fujifilm_xseries', '#fujinon', '#fujilove', '#myfujilove'],
     headless: false,
-    username: 'whoisjordangarcia',
-    password: 'LHJcapHgqo6gi3ENNsrK',
+    username: processs.env.username,
+    password: process.env.password,
+    // /Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome --remote-debugging-port=9222 --no-first-run --no-default-browser-check --user-data-dir=$(mktemp -d -t 'chrome-remote_data_dir')
     browserWsEndpoint:
-      'ws://127.0.0.1:9222/devtools/browser/dd579d58-57ab-4729-9903-6294fab85dbf',
+      'ws://127.0.0.1:9222/devtools/browser/8161ba04-ec94-48c9-bac8-83b572b78c8a',
   };
 
   // selectors

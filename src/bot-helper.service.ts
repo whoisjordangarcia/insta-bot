@@ -293,8 +293,10 @@ export class BotHelperService extends BotBaseService {
       await this.page.waitForSelector(selector, {
         timeout,
       });
+      this.logger.verbose(`Found element ${selector}`)
     } catch (e) {
       this.logger.error(`Could not wait for element ${selector}`);
+      throw new Error(e)
     }
   };
 

@@ -3,17 +3,19 @@ import { connect } from 'puppeteer';
 import { shuffle } from 'lodash';
 
 import { BotHelperService } from './bot-helper.service';
+import { exists } from 'fs';
 
 @Injectable()
 export class BotService extends BotHelperService {
   initPuppeter = async () => {
-    const browser = await connect({
+    let browser = await connect({
       browserWSEndpoint: this.config.browserWsEndpoint,
       defaultViewport: {
         width: 1080,
         height: 850,
       },
     });
+
     let instagramPage = null;
     const pages = await browser.pages();
     for (const page of pages) {
@@ -194,7 +196,12 @@ export class BotService extends BotHelperService {
   async start(): Promise<string> {
     this.logger.log('Instabot Initialized');
 
-    this.page = await this.initPuppeter();
+    try {
+      this.page = await this.initPuppeter();
+    } catch (e) {
+      console.log('Error', e.error);
+      return;
+    }
 
     this.printStats();
 

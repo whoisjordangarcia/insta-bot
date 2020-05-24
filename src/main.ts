@@ -4,7 +4,7 @@ import { BotService } from './bot.service';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, {
-    logger: ['log'],
+    logger: ['log', 'verbose', 'error'],
   });
   //await app.listen(3000);
   const tasksService = app.select(AppModule).get(BotService, { strict: true });
